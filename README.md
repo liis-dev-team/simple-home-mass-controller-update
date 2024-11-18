@@ -25,6 +25,14 @@ report_writer:
   is_absolute_path: false
   detail_report: true
 
+actions:
+  validate:
+    timeout: 10
+    enabled: true
+  update:
+    timeout: 300
+    enabled: true
+
 software_build_url: https://files.liisteam.liis.su/api/public/.../simplehome.zip
 file_service_token: access-token
 
@@ -39,7 +47,6 @@ controllers_blacklist:
  - wirenboard-QWERTY04
 
 controller_uid_regex: wirenboard-[A-Z0-9]{8}
-validate_controllers: true
 ```
 ### Описание синтаксиса
 
@@ -51,14 +58,18 @@ validate_controllers: true
 |`controller_uid_regex`|`str`||None|Регулярное выражение, которое используется для фильтрации контроллеров по uid. К примеру, если необходимо обновить только контроллеры wirenboard, то это можно сделать применив выражение `wirenboard-[A-Z0-9]{8}`|
 |`controllers_whitelist`|`list[str]`||[]|Список uid контроллеров, на которые необходимо установить обновление. Другие контроллеры не будут обновлены. Если определен, то `controllers_blacklist` игнорируется|
 |`controllers_blacklist`|`list[str]`||[]|Список uid контроллеров, которые нужно игнорировать. Если определен `controllers_whitelist`, то данный параметр игнорируется|
-|`validate_controllers`|`bool`||true|Если false, то этап проверки наличия сервиса обслуживания (sh-updater) для каждого контроллера пропускается|
 |`websockets.url`|`str`||"wss://dev.cloud.simple-home.liis.su"|Домен брокера сообщений в формате `{ws, wss}://domain[:port]`|
 |`websockets.login`|`str`|✅||Логин для подключения к брокеру|
 |`websockets.password`|`str`|✅||Пароль для подключения к брокеру|
 |`report_writer.report_dir_path`|`str`||Текущая рабочая директория|Папка для сохранения отчетов|
 |`report_writer.is_absolute_path`|`bool`||true|Если true, то `report_writer.report_dir_path` рассматривается как путь относительно текущей рабочей директории. Иначе `report_writer.report_dir_path` рассматривается как абсолютный путь|
 |`report_writer.detail_report`|`bool`||true|Если true, то вывод каждого контроллера будет записан в отдельный файл. Иначе выводы контроллеров не сохраняются в отчет|
-
+|`actions.update`|`dict`|||Конфигурация метода обновления контроллеров|
+|`actions.update.timeout`|`int`||300|Таймаут (в секундах), по истечении которого запрос на обновление контроллера считается провальным|
+|`actions.update.enabled`|`bool`||true|Если false, то метод обновления не будет запущен|
+|`actions.validate`|`dict`|||Конфигурация метода валидации контроллеров. Валидатор - это метод, который проверяет наличие на контроллере служебного сервиса (sh-updater). Если сервис не установлен, то валидатор исключает контроллер из выборки и данный контроллер не будет обновлен|
+|`actions.validate.timeout`|`int`||10|Таймаут (в секундах), по истечении которого запрос версии ПО контроллера считается провальным|
+|`actions.validate.enabled`|`bool`||true|Если false, то валидатор не будет запущен|
 ## Запуск
 ### Синтаксис команды
 ``` bash
