@@ -1,11 +1,11 @@
 from dataclasses import dataclass, field
-from os import path as sys_path
-from os import getcwd
+from os import path as sys_path, getcwd
+from yaml import YAMLObject
 from typing import Any, Literal
 
 
 @dataclass
-class WebsocketsConfig:
+class WebsocketsConfig(YAMLObject):
     login: str = field(repr=False)
     password: str = field(repr=False)
     url: str = "wss://dev.cloud.simple-home.liis.su"
@@ -18,7 +18,7 @@ class WebsocketsConfig:
 
 
 @dataclass
-class ReportConfig:
+class ReportConfig(YAMLObject):
     report_dir_path: str = field(default_factory=getcwd)
     is_absolute_path: bool = True
     detail_report: bool = True
@@ -30,11 +30,35 @@ class ReportConfig:
 
 
 @dataclass
-class Config:
+class BaseActionConfig(YAMLObject):
+    timeout: int = 10
+    enabled: bool = True
+
+
+@dataclass
+class UpdateActionConfig(BaseActionConfig):
+    timeout: int = 5*60
+
+
+@dataclass
+class ActionsConfig(YAMLObject):
+    validate: BaseActionConfig = field(default_factory=BaseActionConfig)
+    update: UpdateActionConfig = field(default_factory=UpdateActionConfig)
+
+    def __post_init__(self):
+        if isinstance(self.validate, dict):
+            self.validate = BaseActionConfig(**self.validate)
+        if isinstance(self.update, dict):
+            self.update = UpdateActionConfig(**self.update)
+
+
+@dataclass
+class Config(YAMLObject):
     websockets: WebsocketsConfig
-    report_writer: ReportConfig
     software_build_url: str
     file_service_token: str
+    report_writer: ReportConfig = field(default_factory=ReportConfig)
+    actions: ActionsConfig = field(default_factory=ActionsConfig)
     max_pool_size: int = 10
     # white list of controllers uid
     controllers_blacklist: set[str] = field(default_factory=set)
@@ -42,7 +66,14 @@ class Config:
     controllers_whitelist: set[str] = field(default_factory=set)
     # regex expression, that will be used to filter controllers uids
     controller_uid_regex: str | None = None
-    validate_controllers: bool = True
+
+    def __post_init__(self):
+        if isinstance(self.websockets, dict):
+            self.websockets = WebsocketsConfig(**self.websockets)
+        if isinstance(self.report_writer, dict):
+            self.report_writer = ReportConfig(**self.report_writer)
+        if isinstance(self.actions, dict):
+            self.actions = ActionsConfig(**self.actions)
 
 
 @dataclass

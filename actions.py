@@ -3,12 +3,12 @@ import asyncio
 from datetime import datetime
 import json
 import re
-from typing import Any, Generator, Iterable
-from uuid import uuid4
+from typing import Any, Awaitable, Callable, Generator, Iterable
 from itertools import chain
 
 from websockets import connect
 
+from config_produser import ConfigProdiser
 from core import colors, get_auth_header
 from dtos import ControllerStatus, WorkerResponse, Config
 from executor import PoolExecutor
@@ -20,10 +20,18 @@ class ActionsAbc(ABC):
         self.config = config
         self.exec = PoolExecutor(config)
         self.writer = writer
+        self.run = self.validate_action(func=self.run)
 
     @abstractmethod
     async def run(self, *args, **kwargs) -> Any:
         ...
+
+    @abstractmethod
+    def validate_action(self, func: Callable[..., Awaitable[Any]]) -> Awaitable[Any]:
+        """
+        Decorator that wraps run() method and determine
+        if action should be executed 
+        """
 
 
 class GetControllers(ActionsAbc):
@@ -31,6 +39,12 @@ class GetControllers(ActionsAbc):
         super().__init__(config, writer)
         self.url = config.websockets.build_url(controller_uid="null")
         self.headers = {"Authorization": get_auth_header(config)}
+
+    def validate_action(self, func: Callable[[None],
+                                             Awaitable[list[ControllerStatus]]]):
+        async def wrapper():
+            return await func()
+        return wrapper
 
     def filter_controllers(
         self,
@@ -102,6 +116,19 @@ class ValidateControllers(ActionsAbc):
     def __init__(self, config: Config, writer: ReportWriter) -> None:
         super().__init__(config, writer)
         self.headers = {"Authorization": get_auth_header(config)}
+        self.request_timeout = config.actions.validate.timeout
+
+    def validate_action(self, func: Callable[[list[ControllerStatus]],
+                                             Awaitable[list[str]]]):
+        async def wrapper(controllers: list[ControllerStatus]):
+            if self.config.actions.validate.enabled:
+                if not ConfigProdiser.already_confirmed():
+                    input("Push Enter to validate controllers or Ctrl+C to exit")
+                return await func(controllers)
+            print(colors.yellow(
+                "Validation action is disable in config. Skip."))
+            return [c.uid for c in controllers]
+        return wrapper
 
     async def __worker(self, uid: str) -> WorkerResponse:
         def save_response(resp: str):
@@ -120,8 +147,7 @@ class ValidateControllers(ActionsAbc):
         admin_subscribe = {
             "action": "admin_subscribe",
             "uid": uid}
-        id_ = str(uuid4())
-        url = self.config.websockets.build_url(uid, client_id=f"{uid}_worker_{id_}")
+        url = self.config.websockets.build_url(uid, client_id=f"{uid}_worker")
         async with connect(url, additional_headers=self.headers) as websocket:
             await websocket.send(json.dumps(admin_subscribe))
             await asyncio.sleep(.2)
@@ -129,7 +155,7 @@ class ValidateControllers(ActionsAbc):
             resp: dict = {}
             while True:
                 try:
-                    async with asyncio.timeout(10):
+                    async with asyncio.timeout(self.request_timeout):
                         resp = await websocket.recv()
                         save_response(resp)
                         resp = json.loads(resp)
@@ -145,9 +171,6 @@ class ValidateControllers(ActionsAbc):
         """
             Return list of controllers uid, that can be updated
         """
-        if not self.config.validate_controllers:
-            print(colors.yellow("Skip controllers validation"))
-            return
         print("\nValidate connected controllers:")
         approved_controllers = []
         rejected_controllers = []
@@ -186,6 +209,19 @@ class UpdateControllers(ActionsAbc):
     def __init__(self, config: Config, writer: ReportWriter) -> None:
         super().__init__(config, writer)
         self.headers = {"Authorization": get_auth_header(config)}
+        self.request_timeout = config.actions.update.timeout
+
+    def validate_action(self, func: Callable[[list[ControllerStatus]],
+                                             Awaitable[None]]):
+        async def wrapper(controllers_uids: Iterable[str]):
+            if self.config.actions.update.enabled:
+                if not ConfigProdiser.already_confirmed():
+                    input("Push Enter to update controllers or Ctrl+C to exit")
+                return await func(controllers_uids)
+            print(colors.yellow(
+                "Update action is disable in config. Skip."))
+            return
+        return wrapper
 
     async def __worker(self, uid: str) -> WorkerResponse:
         def save_response(resp: str):
@@ -209,7 +245,7 @@ class UpdateControllers(ActionsAbc):
             resp: dict = {}
             while True:
                 try:
-                    async with asyncio.timeout(5*60):
+                    async with asyncio.timeout(self.request_timeout):
                         resp_raw = await websocket.recv()
                         resp = json.loads(resp_raw)
                         action = resp.get("action")
@@ -229,6 +265,11 @@ class UpdateControllers(ActionsAbc):
                                           status="error")
 
     async def run(self, controllers_uids: Iterable[str]):
+        if not controllers_uids:
+            print(colors.yellow("No controllers to update."),
+                  "Exit.", sep="\n")
+            return
+        print("\nUpdate connected controllers:")
         failed_controllers = []
         updated_controllers = []
         executor = PoolExecutor(config=self.config)
